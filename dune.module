@@ -1,0 +1,10 @@
+################################
+# Dune module information file #
+################################
+
+#Name of the module
+Module: dune-distrib-test
+Version: 0.1
+Maintainer: benjamin.bykowski@mail.rwth-aachen.de
+#depending on 
+Depends: dune-grid dune-pdelab

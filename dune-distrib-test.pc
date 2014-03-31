@@ -1,0 +1,15 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+CXX=/usr/bin/c++ -std=c++0x
+CC=/usr/bin/cc
+DEPENDENCIES=
+
+Name: dune-distrib-test
+Version: 0.1
+Description: dune-distrib-test module
+URL: http://dune-project.org/
+Requires: dune-grid dune-pdelab
+Libs: -L
+Cflags: -I
