@@ -1,0 +1,65 @@
+From 77ac2212a67b47c6a6f1c856290129396e4d918b Mon Sep 17 00:00:00 2001
+From: Convex Function <329364@wright.mathepool.rwth-aachen.de>
+Date: Wed, 2 Apr 2014 09:08:48 +0200
+Subject: [PATCH] Added functions for scatterv, gatherv and allgatherv.
+
+---
+ dune/common/parallel/mpicollectivecommunication.hh | 28 ++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/dune/common/parallel/mpicollectivecommunication.hh b/dune/common/parallel/mpicollectivecommunication.hh
+index 7433e19..8b57b53 100644
+--- a/dune/common/parallel/mpicollectivecommunication.hh
++++ b/dune/common/parallel/mpicollectivecommunication.hh
+@@ -258,6 +258,15 @@ namespace Dune
+                         root,communicator);
+     }
+ 
++    //! @copydoc CollectiveCommunication::gatherv()
++    template<typename T>
++    int gatherv (T* in, int sendlen, T* out, int* recvlen, int* displ, int root) const
++    {
++      return MPI_Gatherv(in,sendlen,MPITraits<T>::getType(),
++                         out,recvlen,displ,MPITraits<T>::getType(),
++                         root,communicator);
++    }
++
+     //! @copydoc CollectiveCommunication::scatter()
+     //! @note out must have space for P*len elements
+     template<typename T>
+@@ -268,6 +277,16 @@ namespace Dune
+                          root,communicator);
+     }
+ 
++    //! @copydoc CollectiveCommunication::scatterv()
++    template<typename T>
++    int scatterv (T* send, int* sendlen, int* displ, T* recv, int recvlen, int root) const
++    {
++      return MPI_Scatterv(send,sendlen,displ,MPITraits<T>::getType(),
++                          recv,recvlen,MPITraits<T>::getType(),
++                          root,communicator);
++    }
++
++
+     operator MPI_Comm () const
+     {
+       return communicator;
+@@ -282,6 +301,15 @@ namespace Dune
+                            communicator);
+     }
+ 
++    //! @copydoc CollectiveCommunication::allgatherv()
++    template<typename T>
++    int allgatherv (T* in, int sendlen, T* out, int* recvlen, int* displ) const
++    {
++      return MPI_Allgatherv(in,sendlen,MPITraits<T>::getType(),
++                            out,recvlen,displ,MPITraits<T>::getType(),
++                            communicator);
++    }
++
+     //! @copydoc CollectiveCommunication::allreduce(Type* inout,int len) const
+     template<typename BinaryFunction, typename Type>
+     int allreduce(Type* inout, int len) const
+-- 
+1.8.5.5
+

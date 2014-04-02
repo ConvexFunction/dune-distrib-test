@@ -1,5 +1,6 @@
 #include <config.h>
 
+#include <numeric>
 #include <vector>
 
 #include <dune/common/function.hh>
@@ -21,6 +22,7 @@
 #include <dune/localfunctions/lagrange/q1.hh>
 
 #include "GlobalUniqueIndex.hh"
+#include "mpifunctions.hh"
 
 
 using namespace Dune;
@@ -468,12 +470,14 @@ int main (int argc, char *argv[]) try
   for( ; it != endIt; ++it )
     isGhost[indexSet.index(*it)] = true;
 
+
+
   // Transfer matrix data
   std::cout << "Rank " << mpihelper.rank() << ": Transferring matrix data ..." << std::endl;
 
   // Create vector for transfer data
   typedef TransferMatrixTuple<MatrixType::block_type> TransferMatrixTupleType;
-  std::vector<TransferMatrixTupleType> matrixEntries;
+  std::vector<TransferMatrixTupleType> localMatrixEntries;
 
   // Convert local matrix to serializable array
   typedef MatrixType::row_type::ConstIterator ColumnIterator;
@@ -484,20 +488,15 @@ int main (int argc, char *argv[]) try
       const int j = cIt.index();
 
       if (not isGhost[i] and not isGhost[j]) // !!! OK ???
-	matrixEntries.push_back(TransferMatrixTupleType(guIndex.globalIndex(i), guIndex.globalIndex(j), *cIt));
+	localMatrixEntries.push_back(TransferMatrixTupleType(guIndex.globalIndex(i), guIndex.globalIndex(j), *cIt));
     }
 
-  // Get number of matrix entries on each process and sum them up
-  size_t nLocalMatrixEntries = matrixEntries.size();
+  // Get number of matrix entries on each process
+  std::vector<int> localMatrixEntriesSizes(MPIFunctions::shareSizes(grid->leafGridView(), localMatrixEntries.size()));
 
-  const size_t nTotalMatrixEntries = mpihelper.getCollectiveCommunication().sum<size_t>(nLocalMatrixEntries);
+  // Get matrix entries from every process
+  std::vector<TransferMatrixTupleType> globalMatrixEntries(MPIFunctions::gatherv(grid->leafGridView(), localMatrixEntries, localMatrixEntriesSizes, root_rank));
 
-  // Resize array on root appropriately and transfer all entries
-  if (root_rank == mpihelper.rank())
-    matrixEntries.resize(nTotalMatrixEntries);
-
-  // !!! SHOULD ACTUALLY BE A CALL TO GATHERV. WORKS ONLY UNDER VERY SPECIAL CIRCUMSTANCES THIS WAY.
-  mpihelper.getCollectiveCommunication().gather<TransferMatrixTupleType>(matrixEntries.data(), matrixEntries.data(), nLocalMatrixEntries, root_rank);
 
 
 
@@ -506,25 +505,17 @@ int main (int argc, char *argv[]) try
 
   // Create vector for transfer data
   typedef TransferVectorTuple<VectorType::block_type> TransferVectorTupleType;
-  std::vector<TransferVectorTupleType> vectorEntries;
+  std::vector<TransferVectorTupleType> localVectorEntries;
 
   // Also translate rhs entries
   for (size_t k = 0; k < rhs.size(); ++k)
     if (not isGhost[k])
-      vectorEntries.push_back(TransferVectorTupleType(guIndex.globalIndex(k), rhs[k]));
+      localVectorEntries.push_back(TransferVectorTupleType(guIndex.globalIndex(k), rhs[k]));
 
   // Also get number of vector entries on each process and sum them up
-  size_t nLocalVectorEntries = vectorEntries.size();
+  std::vector<int> localVectorEntriesSizes(MPIFunctions::shareSizes(grid->leafGridView(), localVectorEntries.size()));
 
-  const size_t nTotalVectorEntries = mpihelper.getCollectiveCommunication().sum<size_t>(nLocalVectorEntries);
-
-  // Resize array on root appropriately and transfer all entries
-  if (root_rank == mpihelper.rank())
-    vectorEntries.resize(nTotalVectorEntries);
-
-  // !!! SHOULD ACTUALLY BE A CALL TO GATHERV. WORKS ONLY UNDER VERY SPECIAL CIRCUMSTANCES THIS WAY.
-  mpihelper.getCollectiveCommunication().gather<TransferVectorTupleType>(vectorEntries.data(), vectorEntries.data(), nLocalVectorEntries, root_rank);
-
+  std::vector<TransferVectorTupleType> globalVectorEntries(MPIFunctions::gatherv(grid->leafGridView(), localVectorEntries, localVectorEntriesSizes, root_rank));
 
 
   //// Assemble data on root process and solve
@@ -547,19 +538,19 @@ int main (int argc, char *argv[]) try
 
     occupationPattern.resize(nGlobalNodes, nGlobalNodes);
 
-    for (size_t k = 0; k < nTotalMatrixEntries; ++k)
-      occupationPattern.add(matrixEntries[k].row, matrixEntries[k].col);
+    for (size_t k = 0; k < globalMatrixEntries.size(); ++k)
+      occupationPattern.add(globalMatrixEntries[k].row, globalMatrixEntries[k].col);
 
     occupationPattern.exportIdx(stiffnessMatrix);
 
     // Move entries to matrix
-    for(size_t k = 0; k < nTotalMatrixEntries; ++k)
-      stiffnessMatrix[matrixEntries[k].row][matrixEntries[k].col] = matrixEntries[k].entry;
+    for(size_t k = 0; k < globalMatrixEntries.size(); ++k)
+      stiffnessMatrix[globalMatrixEntries[k].row][globalMatrixEntries[k].col] = globalMatrixEntries[k].entry;
 
     // Move entries to rhs
     std::cout << "Assembling global right hand side on root process ..." << std::endl;
-    for (size_t k = 0; k < nTotalVectorEntries; ++k)
-      rhs_global[vectorEntries[k].row] = vectorEntries[k].entry;
+    for (size_t k = 0; k < globalVectorEntries.size(); ++k)
+      rhs_global[globalVectorEntries[k].row] = globalVectorEntries[k].entry;
 
     // Technicality:  turn the matrix into a linear operator
     MatrixAdapter<MatrixType,VectorType,VectorType> op(stiffnessMatrix);
@@ -584,19 +575,19 @@ int main (int argc, char *argv[]) try
 
     // Translate solution back
     std::cout << "Translating solution back on root process ..." << std::endl;
-    for (size_t k = 0; k < nTotalVectorEntries; ++k)
-      vectorEntries[k].entry = x_global[vectorEntries[k].row];
+    for (size_t k = 0; k < globalVectorEntries.size(); ++k)
+      globalVectorEntries[k].entry = x_global[globalVectorEntries[k].row];
   }
 
   // Distribute solution
   std::cout << "Rank " << mpihelper.rank() << ": Transferring solution ..." << std::endl;
 
-  mpihelper.getCollectiveCommunication().scatter<TransferVectorTupleType>(vectorEntries.data(), vectorEntries.data(), nLocalVectorEntries, root_rank);
+  MPIFunctions::scatterv(grid->leafGridView(), localVectorEntries, globalVectorEntries, localVectorEntriesSizes, root_rank);
 
   // And translate solution again
   // "nLocalVectorEntries" is also the number of  local interior and border nodes
-  for (size_t k = 0; k < nLocalVectorEntries; ++k)
-    x[guIndex.localIndex(vectorEntries[k].row)] = vectorEntries[k].entry;
+  for (size_t k = 0; k < localVectorEntries.size(); ++k)
+    x[guIndex.localIndex(localVectorEntries[k].row)] = localVectorEntries[k].entry;
 
   // Output result
   std::cout << "Rank " << mpihelper.rank() << ": Writing solution ..." << std::endl;

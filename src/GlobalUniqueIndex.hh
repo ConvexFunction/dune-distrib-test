@@ -10,6 +10,8 @@
 #include <dune/common/exceptions.hh>
 #include <dune/common/parallel/mpihelper.hh>
 
+#include "mpifunctions.hh"
+
 
 template<class GridView>
 class GlobalUniqueIndex
@@ -61,49 +63,6 @@ private:
     }
   }
 
-  std::vector<int> shareSizes(const GridView& gridview, const int& shareRef) {
-    std::vector<int> sizesVector(gridview.comm().size());
-
-    int share = shareRef;
-    gridview.comm().template allgather<int>(&share, 1, sizesVector.data());
-
-
-    return sizesVector;
-  }
-
-
-  std::vector<IdType> obtainGlobalIds(const GridView& gridview, std::vector<IdType>& localBorderIds, std::vector<int>& localBorderSizes) {
-    int nLocalBorderEntity = localBorderIds.size();
-
-    std::vector<IdType> globalBorderIds(std::accumulate(localBorderSizes.begin(), localBorderSizes.end(), 0));
-
-    std::vector<int> globalBorderOffsets(localBorderSizes);
-    globalBorderOffsets.insert(globalBorderOffsets.begin(), 0);
-
-    MPI_Allgatherv(localBorderIds.data(), nLocalBorderEntity, MPI_DOUBLE,
-		   globalBorderIds.data(), localBorderSizes.data(), globalBorderOffsets.data(), MPI_DOUBLE,
-		   MPI_COMM_WORLD);
-
-    return globalBorderIds;
-  }
-
-
-  std::vector<IdTuple> obtainOwnedTuples(const GridView& gridview, std::vector<IdTuple>& localOwnedIdVector, std::vector<int>& nOwnedBorderEntitySizes) {
-    int nOwnedBorderEntity = localOwnedIdVector.size();
-
-    std::vector<IdTuple> globalOwnedIdVector(std::accumulate(nOwnedBorderEntitySizes.begin(), nOwnedBorderEntitySizes.end(), 0));
-
-    std::vector<int> nOwnedBorderEntityOffsets(nOwnedBorderEntitySizes);
-    nOwnedBorderEntityOffsets.insert(nOwnedBorderEntityOffsets.begin(), 0);
-
-    MPI_Allgatherv(localOwnedIdVector.data(), nOwnedBorderEntity, MPI_DOUBLE_INT,
-		   globalOwnedIdVector.data(), nOwnedBorderEntitySizes.data(), nOwnedBorderEntityOffsets.data(), MPI_DOUBLE_INT, MPI_COMM_WORLD);
-
-
-    return globalOwnedIdVector;
-  }
-
-
   std::vector<IdType> obtainOwnedBorderIds(const GridView& gridview, const std::vector<IdType>& localBorderIds,
 					   const std::vector<int>& localBorderSizes, const std::vector<IdType>& globalBorderIds) {
     std::vector<IdType> ownedLocalBorderIds(localBorderIds);
@@ -140,10 +99,10 @@ public:
     collectLocalBorderEntityInfo(gridview, localBorderIds, idToLocalIndexMap);
 
     // Share number of border entities
-    std::vector<int> localBorderSizes(shareSizes(gridview, localBorderIds.size()));
+    std::vector<int> localBorderSizes(MPIFunctions::shareSizes(gridview, localBorderIds.size()));
 
     // Obtain all ids
-    std::vector<IdType> globalBorderIds(obtainGlobalIds(gridview, localBorderIds, localBorderSizes));
+    std::vector<IdType> globalBorderIds(MPIFunctions::allgatherv(gridview, localBorderIds, localBorderSizes));
 
 
     //// Distribute border entities
@@ -162,7 +121,7 @@ public:
     const size_t nLocalOwnedEntity = nLocalInteriorEntity + nOwnedBorderEntity;
 
     // Share number of owned entities on every process
-    std::vector<int> nOwnedEntity(shareSizes(gridview, nLocalOwnedEntity));
+    std::vector<int> nOwnedEntity(MPIFunctions::shareSizes(gridview, nLocalOwnedEntity));
 
     // Calculate offset
     const int myoffset = std::accumulate(nOwnedEntity.begin(), nOwnedEntity.begin() + gridview.comm().rank(), 0);
@@ -190,9 +149,9 @@ public:
 
 
     ///// Share global indices for owned Entities
-    std::vector<int> nOwnedBorderEntitySizes(shareSizes(gridview, nOwnedBorderEntity));
+    std::vector<int> nOwnedBorderEntitySizes(MPIFunctions::shareSizes(gridview, nOwnedBorderEntity));
 
-    std::vector<IdTuple> globalOwnedIdVector(obtainOwnedTuples(gridview, localOwnedIdVector, nOwnedBorderEntitySizes));
+    std::vector<IdTuple> globalOwnedIdVector(MPIFunctions::allgatherv(gridview, localOwnedIdVector, nOwnedBorderEntitySizes));
 
 
     //// Add global indices for missing border entities
